@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PDF Propagation — automatic-h local FFT experiment</title>
+<style>
+body{font-family:Arial,sans-serif;max-width:1980px;margin:28px auto;padding:0 18px;color:#111}
+h1{font-size:24px;margin-bottom:8px}p{line-height:1.35}
+.gameHeading{max-width:100%;text-align:left}
+.gameHeading h1{margin:0 0 16px}
+.gameLogo{display:block;width:360px;max-width:100%;height:auto}
+.gameHeading .controls{justify-content:center}
+.controls{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:14px 0}
+.developmentOptions{display:grid;gap:6px;max-width:280px}
+button,select{padding:5px 8px}.row{--map-height:17cm;display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+.panel{flex:0 0 auto}.axesTitle{font-weight:700;text-align:center;margin:0 0 7px}
+.movementText{flex:1 1 280px;min-width:0;overflow-wrap:anywhere}
+.movementText>.axesTitle{text-align:left}
+#movementAxes{position:relative}
+.movementTitle{position:absolute;bottom:100%;width:100%;margin:0 0 4px;line-height:20px}
+.mapWrap{position:relative;width:8cm;height:var(--map-height);border:1px solid #111;background:#fff}
+#map,.mapVector{position:absolute;inset:0;width:8cm;height:var(--map-height);display:block}
+#map{border:0;background:transparent}.mapVector{pointer-events:none;overflow:hidden}
+.finishPanel{position:absolute;z-index:1;top:10px;left:50%;transform:translateX(-50%);box-sizing:border-box;width:max-content;max-width:calc(100% - 20px);padding:8px 10px;background:#fff;border:1px solid #555;border-radius:5px;font-size:14px}
+.finishPanel[hidden]{display:none}.finishTitle{font-weight:700;margin-bottom:6px}
+.replayChoices{display:grid;grid-template-columns:auto auto;gap:8px;align-items:center;justify-content:space-between}
+#replayPanel{width:max-content}
+#replayTitle{white-space:nowrap}
+#configurationForm{contain:inline-size;min-width:0}
+#replayPanel button{font-size:13px;line-height:16px;padding:3px 8px}
+#replayPanel #replayBack{padding:2px 5px;justify-self:end}
+#configurationForm{margin-top:10px;font-size:13px}#configurationForm input{box-sizing:border-box;width:100%;margin:5px 0;padding:5px;font:inherit}
+#configurationError{max-width:220px;color:#a00;margin:5px 0}
+#elapsedPanel{font-size:13px;line-height:1.5;pointer-events:none}
+#finishPanel .finishTitle{font-size:14px;line-height:16px;margin-bottom:4px}
+#finishTime{font-size:16px;line-height:19px;font-weight:700;margin-bottom:4px}
+#finishTime.finishReason{font-size:12px;line-height:16px;font-weight:400}
+.finishStats{border-collapse:collapse;font-size:13px;line-height:15px;margin-bottom:4px;font-variant-numeric:tabular-nums}
+.finishStats th,.finishStats td{padding:0 5px;white-space:nowrap;text-align:right}
+.finishStats thead th{font-size:12px;font-weight:700}
+.finishStats tbody th{font-weight:400;text-align:left;padding-left:0}
+.finishActions{display:flex;gap:8px;justify-content:space-between}
+.finishActions button{font-size:13px;line-height:16px;padding:3px 8px;white-space:nowrap}
+.moveWrap{position:relative;width:20cm;height:20cm}.moveWrap canvas,.moveWrap svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+#moveCloud{background:#fff;pointer-events:none}#move{cursor:crosshair}
+.small{font-size:13px;color:#444;max-width:10cm}
+.movementReadout{position:absolute;top:calc(100% + 4px);left:-1px;width:3cm;height:1.3cm;pointer-events:none}
+.movementReadout svg{display:block;width:100%;height:100%}
+.movementGuide{display:flex;flex-direction:column;width:calc(8cm + 2px);max-width:100%;max-height:calc(var(--map-height) + 2px);overflow-y:auto}
+.movementGuide:has(.movementOptions[open]){width:calc(10cm + 2px)}
+#moveCloud,.guideBox{border:1px solid #555;border-radius:5px}
+.guideBox{box-sizing:border-box;flex-shrink:0;padding:10px 12px;font-size:14px;line-height:1.4}
+.guideBox+.guideBox{margin-top:12px}
+.guideBox p{margin:0 0 10px}.guideBox p:last-child{margin-bottom:0}
+.movementChoices{display:grid;gap:8px}
+.movementChoice{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:8px 12px;align-items:start;border:1px solid #aaa;border-radius:5px;padding:8px}
+.movementChoice>label{font-weight:bold}
+.guideBox>summary{cursor:pointer;font-size:16px;font-weight:bold}
+.guideBox[open]>summary{margin-bottom:8px}
+.movementChoices p{margin:0}
+.dragSettings{grid-column:1/-1;display:grid;gap:6px;min-width:0;margin:0 0 0 12px;padding:0;border:0}
+.dragSetting{min-width:0;margin:0;padding:0;border:0}
+.dragSetting legend{padding:0;font-size:12px}
+.dragCommitChoices{display:grid;gap:2px}
+.dragCommitChoices:not(:has(input:checked)) #mapDragCommitHelp{padding:4px 6px;border-left:3px solid #d00000;background:#fff0f0;color:#b00020;font-weight:bold}
+.dragCommitChoices:has(input:checked) .commitHelpExclamation,
+.dragCommitChoices:not(:has(input:checked)) .commitHelpPeriod{display:none}
+.dragSegments{display:grid;grid-template-columns:1fr 1fr;border:1px solid #777;border-radius:5px}
+.dragSegments label{position:relative;padding:3px 6px;text-align:center;cursor:pointer;background:#f5f5f5;box-shadow:inset 0 1px 0 #fff,inset 0 -1px 0 #d0d0d0}
+.dragSegments label:first-child{border-radius:4px 0 0 4px}
+.dragSegments label+label{border-left:1px solid #777;border-radius:0 4px 4px 0}
+.dragSegments input{position:absolute;opacity:0}
+.dragSegments label:has(:checked){background:#d8e2ed;box-shadow:inset 0 2px 4px #35485d40;font-weight:bold}
+.dragSegments label:has(:focus-visible){outline:2px solid #174a80;outline-offset:-2px}
+.dragSettings:disabled{opacity:.6}
+.legend span{display:block}.sw{display:inline-block;width:13px;height:13px;vertical-align:-2px;margin-right:4px}
+#status{font:13px/1.38 Consolas,monospace;white-space:pre-wrap;margin-top:12px;max-width:620px}
+.note{background:#f5f5f5;padding:8px 10px;margin:10px 0;font-size:13px;max-width:1100px}
+</style>
+</head><body>
+<header class="gameHeading">
+<h1><svg class="gameLogo" viewBox="80 140 520 240" width="520" height="240" role="img" aria-label="Leg 13 — Bad luck? Your skill.">
+<image href="logo_lockup/leg13-sans-serif.svg" x="0" y="0" width="1200" height="650" />
+</svg></h1>
+</header>
+<!-- Keep the engine's development settings at their existing defaults. -->
+<div hidden>
+<label>Fixed N:
+<select id="gridN"><option selected>256</option></select></label>
+<label><input id="autoH" type="checkbox" checked> automatic h</label>
+<label>manual h:
+<select id="manualH"><option>0.25</option><option selected>0.5</option><option>1</option><option>2</option><option>4</option><option>8</option><option>16</option></select> m</label>
+<label><input id="boulders" type="checkbox" checked> Structured boulders</label>
+</div>
+<div class="row">
+<div class="panel">
+<div class="mapWrap"><canvas id="map"></canvas><svg id="mapVector" class="mapVector" viewBox="0 0 800 1700"></svg>
+<div id="elapsedPanel" class="finishPanel">
+<div id="elapsedTime" role="status">Elapsed time: 0:00</div>
+<div id="movementReadout" class="movementReadout" hidden>
+<svg viewBox="0 0 300 130">
+<text id="movementReadoutText" fill="#ff2428" font-family="Arial, sans-serif" font-size="29.1"></text>
+</svg>
+</div>
+</div>
+<div id="finishPanel" class="finishPanel" role="status" hidden>
+<div id="finishTitle" class="finishTitle">Leg 13 finished!</div>
+<div id="finishTime"></div>
+<table class="finishStats" aria-label="Leg and route results">
+<thead><tr><th></th><th scope="col">Leg</th><th scope="col">Route</th></tr></thead>
+<tbody>
+<tr><th scope="row">Length</th><td id="legLength"></td><td id="routeLength">—</td></tr>
+<tr><th scope="row">Pace</th><td id="legPace"></td><td id="routePace">—</td></tr>
+</tbody></table>
+<div class="finishActions">
+<button id="playNext" type="button">Play next</button>
+<button id="playAgain" type="button">Other games…</button>
+</div>
+</div>
+<div id="replayPanel" class="finishPanel" role="region" aria-labelledby="replayTitle" hidden>
+<div id="replayTitle" class="finishTitle">Choose a game</div>
+<div class="replayChoices">
+<button id="playNew" type="button">Play next</button>
+<button id="playSame" type="button">Play same</button>
+<button id="playByNumber" type="button" aria-expanded="false" aria-controls="configurationForm">Play by number</button>
+<button id="replayBack" type="button">Back</button>
+</div>
+<form id="configurationForm" hidden novalidate>
+<label for="configurationInput">Configuration number</label>
+<input id="configurationInput" type="text" inputmode="numeric" pattern="[0-9]+" aria-describedby="configurationError">
+<div id="configurationError" role="alert"></div>
+<button type="submit">Play</button>
+</form>
+</div>
+</div>
+<div class="small legend"><span><i class="sw" style="background:rgba(255,0,0,.35)"></i>Present position cloud</span><span><i class="sw" style="background:rgba(255,0,255,.35)"></i>Position-cloud candidate</span></div>
+</div>
+<div class="panel movementGuide" id="movementPanel" tabindex="-1">
+<details id="instructions" class="guideBox" open>
+<summary>Instructions</summary>
+<p>This is an orienteering game.</p>
+<p>Your task is to guide the runner to control 13 as quickly as possible. The position cloud on the map represents uncertainty about the runner's position.</p>
+<p>Choose the direction and distance of the next move (see <em>Movement settings</em> below). The effect on the position cloud is previewed on the map. When you commit, the runner moves roughly as you requested, with some randomness.</p>
+<p>After each movement, the position cloud may shrink as the runner observes the terrain and localizes.</p>
+<p>On long moves, the runner’s typical pace is about 4:45 per kilometre. Each move includes 3 seconds of map reading, so shorter moves are slower overall. The actual pace depends on how far the runner happens to go.</p>
+<p>The terrain is perfectly flat forest. On the map, white represents forest and black dots are boulders.</p>
+</details>
+<details id="movementOptions" class="guideBox movementOptions">
+<summary>Movement settings</summary>
+<div class="movementChoices">
+<div class="movementChoice">
+<label><input type="checkbox" id="dragOnMap" aria-describedby="dragOnMapHelp" autocomplete="off" checked> Drag on map</label>
+<p id="dragOnMapHelp">Press and hold the mouse button on the map, then drag to choose a direction and distance.</p>
+<fieldset id="mapDragSettings" class="dragSettings" aria-label="Drag on map settings">
+<fieldset class="dragSetting">
+<legend>Drag</legend>
+<div class="dragSegments">
+<label><input type="radio" name="mapDragStart" checked> Start from zero</label>
+<label><input type="radio" name="mapDragStart" id="mapDragAdjust"> Adjust preview</label>
+</div>
+</fieldset>
+<fieldset class="dragSetting">
+<legend>Commit</legend>
+<div class="dragCommitChoices">
+<label><input type="checkbox" id="mapDragRelease" aria-describedby="mapDragCommitHelp" checked> Commit when you release the drag</label>
+<label><input type="checkbox" id="mapDragClick" aria-describedby="mapDragCommitHelp"> Commit when you click the map</label>
+<p id="mapDragCommitHelp">Check at least one to commit from the map<span class="commitHelpPeriod">.</span><span class="commitHelpExclamation">!</span></p>
+</div>
+</fieldset>
+<fieldset class="dragSetting">
+<legend>After committing</legend>
+<div class="dragSegments">
+<label><input type="radio" name="mapDragAfterCommit" checked> Clear preview</label>
+<label><input type="radio" name="mapDragAfterCommit" id="mapDragKeepPreview"> Preview same move</label>
+</div>
+</fieldset>
+</fieldset>
+</div>
+<div class="movementChoice">
+<label><input type="checkbox" id="keyboardMovement" aria-describedby="keyboardHelp" autocomplete="off" checked> Keyboard</label>
+<p id="keyboardHelp">↑/↓ change distance by 10 m. Tap ←/→ to turn 1° or hold to turn in 5° steps. Press Space to commit.</p>
+</div>
+<div class="movementChoice">
+<label><input type="checkbox" id="movementAxesEnabled" aria-describedby="movementAxesHelp" autocomplete="off"> Movement axes</label>
+<p id="movementAxesHelp">Hover over the axes to preview a move. Click to commit.</p>
+</div>
+</div>
+</details>
+</div>
+<div class="panel" id="movementAxes" hidden>
+<div class="axesTitle movementTitle">Movement axes</div>
+<div class="moveWrap"><canvas id="moveCloud" width="500" height="500"></canvas><svg id="move" tabindex="-1" viewBox="0 0 2000 2000"></svg></div>
+</div>
+<div class="movementText">
+<div class="axesTitle">Debug and development</div>
+<div id="configurationNumber">Configuration: 1</div>
+<div class="controls">
+<button id="reset">Reset</button>
+<button id="next">Next</button>
+</div>
+<div class="developmentOptions">
+<label><input id="debug" type="checkbox"> Show runner position</label>
+<label><input id="fftLocalization" type="checkbox"> Use FFT localization</label>
+<label><input id="worstCaseLeg" type="checkbox"> Analyze UI regions</label>
+<label for="overlayShift">Overlay shift (positive = down): <output id="overlayShiftValue" for="overlayShift">0 m</output></label>
+<input id="overlayShift" type="range" min="-200" max="200" step="1" value="0" disabled>
+</div>
+<div id="status"></div>
+</div></div>
+
+<script src="map_generation/boulder_generator.js"></script>
+<script src="leg_generation/course_random.js"></script>
+<script src="leg_generation/leg13_configuration.js"></script>
+<script src="map_course.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "webfft": "./node_modules/webfft/lib/main.js"
+  }
+}
+</script>
+<script type="module">
+import { initializeGame } from "./modules/pdf_engine.js";
+import { localizeBFFTCoarse } from "./modules/localization_fft.js";
+initializeGame({fftLocalizer:localizeBFFTCoarse});
+</script></body></html>
