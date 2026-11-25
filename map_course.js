@@ -86,37 +86,16 @@ function drawBoulders(parent, boulders, transform) {
  // Cache placement for this generated course, independently of terrain and redraws.
  let rulerPlacement=null;
  setConfiguration(1);
- function rotatedBounds(box,cx=0,cy=0){
-  const points=[];
+ function bottomRightRulerPlacement(ruler){
+  const box=ruler.getBBox(),angle=configuration.orientationDeg*Math.PI/180;
+  const corners=[];
   for(const x of [box.x,box.x+box.width])for(const y of [box.y,box.y+box.height]){
-   const p=rot({x:x-cx,y:y-cy},configuration.orientationDeg*Math.PI/180);
-   points.push({x:p.x+cx,y:p.y+cy});
+   corners.push(rot({x,y},angle));
   }
-  return {xmin:Math.min(...points.map(p=>p.x)),xmax:Math.max(...points.map(p=>p.x)),
-   ymin:Math.min(...points.map(p=>p.y)),ymax:Math.max(...points.map(p=>p.y))};
- }
- function chooseRulerPlacement(ruler,course,numbers){
-  // Measure the ruler, label, and north arrow with their shared north-up rotation.
-  const footprint=rotatedBounds(ruler.getBBox()),margin=24;
-  // Reserve a 48-unit strip for the number, with a 12-unit gap to the ruler group.
-  const candidates=[margin-footprint.xmin,800-48-margin/2-footprint.xmax].map(x=>({
-   x,y:1700-margin-footprint.ymax
-  }));
-  const obstacles=[...course.children,...numbers.children].map(el=>{
-   const b=el.getBBox();
-   // Text rotates about its own anchor; other course graphics are unrotated.
-   if(el.tagName.toLowerCase()==='text')return rotatedBounds(b,Number(el.getAttribute('x')),Number(el.getAttribute('y')));
-   return {xmin:b.x-2.6,xmax:b.x+b.width+2.6,ymin:b.y-2.6,ymax:b.y+b.height+2.6};
-  });
-  function clearance(p){
-   const r={xmin:footprint.xmin+p.x,xmax:footprint.xmax+p.x,
-    ymin:footprint.ymin+p.y,ymax:footprint.ymax+p.y};
-   // Conservative graphic bounds include circles, numbers, and all course lines.
-   return Math.min(...obstacles.map(b=>Math.hypot(
-    Math.max(0,b.xmin-r.xmax,r.xmin-b.xmax),
-    Math.max(0,b.ymin-r.ymax,r.ymin-b.ymax))));
-  }
-  return clearance(candidates[1])>clearance(candidates[0])?candidates[1]:candidates[0];
+  const right=Math.max(...corners.map(point=>point.x));
+  const bottom=Math.max(...corners.map(point=>point.y));
+  // Reserve the rightmost 48 units for the configuration number, plus a 12-unit gap.
+  return {x:800-48-12-right,y:1700-24-bottom};
  }
  function render(mapVector,{bouldersOn=true,beforeBoulders=null}={}){
   const MAP_ORIENTATION_DEG=configuration.orientationDeg;
@@ -143,7 +122,7 @@ function drawBoulders(parent, boulders, transform) {
   rulerLines.appendChild(svgEl('line',{x1:rulerCx-rw/2,y1:rulerCy,x2:rulerCx+rw/2,y2:rulerCy}));
   rg.appendChild(svgEl('text',{x:rulerCx,y:rulerCy+rh/2+labelGap,'dominant-baseline':'hanging','font-family':'Arial, sans-serif','font-size':'29.1','text-anchor':'middle','fill':'#ff2428','stroke':'none'},'100 m'));
   rg.appendChild(createNorthArrow(-28,-111.74,56,103));
-  if(!rulerPlacement)rulerPlacement=chooseRulerPlacement(rg,gC,gN);
+  if(!rulerPlacement)rulerPlacement=bottomRightRulerPlacement(rg);
   rulerAnchor.setAttribute('transform',`translate(${rulerPlacement.x} ${rulerPlacement.y})`);
   if(beforeBoulders)beforeBoulders(mapVector);
 const visibleBoulders = activeBoulders(bouldersOn).filter(b =>

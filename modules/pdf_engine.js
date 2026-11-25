@@ -158,7 +158,7 @@ const MEMORY_LIMIT_MB=450;
 // The localization lab imports this module without loading map_course.js.
 
 let fixedN=256,bouldersOn=true,actual={x:0,y:0},finished=false;
-let disqualified=false;
+let disqualification=null;
 let actualTrajectory=[];
 let moveCount=0,raceTimeSec=0,lastDetections=[],hoverS={x:0,y:0},movementHovered=false;
 const KEYBOARD_DISTANCE_STEP_M=10;
@@ -613,7 +613,7 @@ function consumeRaceTime(fullTimeSeconds){
 }
 
 function commit(sx,sy,previewAfterCommit){
-  if(finished)return;
+ if(finished||!mapMenu.hidden)return;
   const t0=performance.now();
 
   const prior=candidate||convolveMovement(
@@ -634,8 +634,8 @@ function commit(sx,sy,previewAfterCommit){
 
   actualTrajectory.push({...actual});
   moveCount++;
-  disqualified=timing.timedOut;
-  if(disqualified){
+  if(timing.timedOut){
+    disqualification="timeout";
     // An interrupted request never reaches its observation/localization step.
     // Keep the last posterior rather than applying the uncompleted full prior.
     finished=true;candidate=null;lastTimes.commit=performance.now()-t0;
@@ -665,7 +665,7 @@ function commit(sx,sy,previewAfterCommit){
   // Once the flag is found, R runs directly to C13 to punch automatically.
   // This is not another requested movement: no map-reading cost, random draw,
   // localization, or move-count increment. Record its distance in the route.
-  if(foundC13&&!disqualified){
+  if(foundC13){
     const punchingDistanceM=LEG_M*Math.hypot(MapCourse.C13.x-actual.x,MapCourse.C13.y-actual.y);
     const punchingTimeSec=punchingDistanceM*RUNNING_TIME_SECONDS_PER_METER;
     const punchingTiming=consumeRaceTime(punchingTimeSec);
@@ -674,10 +674,10 @@ function commit(sx,sy,previewAfterCommit){
       y:actual.y+punchingTiming.fraction*(MapCourse.C13.y-actual.y)
     }:{...MapCourse.C13};
     if(punchingDistanceM>0&&punchingTiming.fraction>0)actualTrajectory.push({...actual});
-    disqualified=punchingTiming.timedOut;
+    if(punchingTiming.timedOut)disqualification="timeout";
   }
   // Finish only after posterior processing and the automatic punching move.
-  finished=disqualified||foundC13;
+  finished=foundC13;
 
   candidate=null;
   lastTimes.commit=performance.now()-t0;
@@ -700,10 +700,11 @@ function startConfiguration(index){
  }
 }
 function nextConfiguration(){if(MapCourse.configuration.index<Number.MAX_SAFE_INTEGER)return startConfiguration(MapCourse.configuration.index+1)}
-let choosingReplay=false;
+let choosingReplay=null;
 function reset(){
- choosingReplay=false;
- disqualified=false;
+ choosingReplay=null;
+ disqualification=null;
+ hideMapMenu();
  document.getElementById("configurationForm").hidden=true;
  document.getElementById("configurationError").textContent="";
  document.getElementById("playByNumber").setAttribute("aria-expanded","false");
@@ -717,7 +718,7 @@ function reset(){
  const hM=Number(document.getElementById("manualH").value)||.5;state=deltaGrid(fixedN,hM,MapCourse.C12.x,MapCourse.C12.y);draw();
 }
 
-let map,mapVector,move,moveCloud,mc,moveCtx;
+let map,mapVector,move,moveCloud,mc,moveCtx,mapMenu;
 function fit(c){const r=c.getBoundingClientRect(),q=devicePixelRatio||1,w=Math.round(r.width*q),h=Math.round(r.height*q);if(c.width!==w||c.height!==h){c.width=w;c.height=h;c.getContext("2d").setTransform(q,0,0,q,0,0)}}
 // Optional rendering target/viewport lets the lab use the same heatmap algorithm.
 // Existing game calls (without options) retain their original behavior.
@@ -754,7 +755,7 @@ function drawMap(){fit(map);const r=map.getBoundingClientRect();mc.clearRect(0,0
  if(candidate&&!finished)drawHeatmap(candidate,r.width,r.height,255,0,255,CANDIDATE_CLOUD_PEAK_ALPHA,false);
  rebuildMap();
  // Never construct route geometry in the DOM while the leg is active.
- if(finished){
+ if(finished&&choosingReplay!=="direct"){
   const points=actualTrajectory.filter((p,i)=>i===0||p.x!==actualTrajectory[i-1].x||p.y!==actualTrajectory[i-1].y);
   if(points.length>1)mapVector.appendChild(MapCourse.svgEl("polyline",{
    points:points.map(p=>`${MapCourse.sxm(p.x)},${MapCourse.sym(p.y)}`).join(" "),
@@ -781,7 +782,7 @@ function drawPanelFrames(overlay){
    let rect,texts=[],buttons=[];
    try {
     panel.style.visibility="hidden";panel.hidden=false;rect=panel.getBoundingClientRect();
-    if(id==="finishPanel")texts=Array.from(panel.querySelectorAll(".finishTitle, #finishTime, th, td, button"),el=>{
+    texts=Array.from(panel.querySelectorAll(".finishTitle, #finishTime, th, td, button"),el=>{
      const box=el.getBoundingClientRect(),style=getComputedStyle(el);
      if(el.tagName.toLowerCase()==="button")buttons.push({rect:box,id:el.id});
      const align=style.textAlign;
@@ -800,13 +801,13 @@ function drawPanelFrames(overlay){
    }));
    for(const t of texts)overlay.appendChild(MapCourse.svgEl("text",{
     x:(t.x-bounds.left)*800/bounds.width,y:(t.y-bounds.top)*1700/bounds.height,
-    fill:"#ff2428","font-family":"Arial, sans-serif","font-size":t.fontSize*800/bounds.width,
-    "font-weight":t.fontWeight,"text-anchor":t.anchor,"dominant-baseline":"central","data-panel-text":"finishPanel"
+    fill:color,"font-family":"Arial, sans-serif","font-size":t.fontSize*800/bounds.width,
+    "font-weight":t.fontWeight,"text-anchor":t.anchor,"dominant-baseline":"central","data-panel-text":id
    },t.text));
    for(const {rect:buttonRect,id:buttonId} of buttons)overlay.appendChild(MapCourse.svgEl("rect",{
     x:(buttonRect.left-bounds.left)*800/bounds.width,y:(buttonRect.top-bounds.top)*1700/bounds.height,
     width:buttonRect.width*800/bounds.width,height:buttonRect.height*1700/bounds.height,
-    rx:2*800/bounds.width,fill:"none",stroke:"#ff2428","stroke-width":2,
+    rx:2*800/bounds.width,fill:"none",stroke:color,"stroke-width":2,
     "data-panel-button":buttonId
    }));
   }
@@ -880,7 +881,9 @@ function drawMove(){
 function status(){
  const m=moments(state),d=Math.hypot(hoverS.x,hoverS.y),mins=Math.floor(raceTimeSec/60),secs=Math.floor(raceTimeSec%60);
  let cand=candidate?`${candidate.hM} m (${candidate.widthM} m window)`:"—";
- return `${finished?(disqualified?"MAX TIME EXCEEDED — disqualified\n":"C13 FOUND — run finished\n"):""}${numericalMessage?numericalMessage+"\n":""}race time: ${mins}:${String(secs).padStart(2,"0")}
+ const outcome=disqualification==="abandoned"?"COURSE ABANDONED — disqualified\n":
+  disqualification==="timeout"?"MAX TIME EXCEEDED — disqualified\n":finished?"C13 FOUND — run finished\n":"";
+ return `${outcome}${numericalMessage?numericalMessage+"\n":""}race time: ${mins}:${String(secs).padStart(2,"0")}
 moves: ${moveCount}
 positive detections last move: ${lastDetections.length}
 fixed N: ${fixedN}
@@ -913,13 +916,13 @@ function draw(){
  drawMove();document.getElementById("status").textContent=status();
  document.getElementById("configurationNumber").textContent=`Configuration: ${MapCourse.configuration.index}`;
  document.getElementById("legLength").textContent=`${Math.round(MapCourse.configuration.legLengthM)} m`;
- document.getElementById("legPace").textContent=disqualified?"-":formatLegPace(raceTimeSec,MapCourse.configuration.legLengthM);
- document.getElementById("finishTitle").textContent=disqualified?"Disqualified.":"Leg 13 finished!";
+ document.getElementById("legPace").textContent=disqualification?"-":formatLegPace(raceTimeSec,MapCourse.configuration.legLengthM);
+ document.getElementById("finishTitle").textContent=disqualification?"Disqualified.":"Leg 13 finished!";
  const routeM=finished?routeLengthMeters(actualTrajectory):0;
  document.getElementById("routeLength").textContent=finished?`${Math.round(routeM)} m`:"—";
  document.getElementById("routePace").textContent=finished&&routeM>0?formatLegPace(raceTimeSec,routeM):"—";
  document.getElementById("next").disabled=MapCourse.configuration.index===Number.MAX_SAFE_INTEGER;
- document.getElementById("finishPanel").hidden=!finished||choosingReplay;
+ document.getElementById("finishPanel").hidden=!finished||Boolean(choosingReplay);
  document.getElementById("replayPanel").hidden=!choosingReplay;
  document.getElementById("playNew").disabled=MapCourse.configuration.index===Number.MAX_SAFE_INTEGER;
  document.getElementById("playNext").disabled=MapCourse.configuration.index===Number.MAX_SAFE_INTEGER;
@@ -927,8 +930,9 @@ function draw(){
  document.getElementById("elapsedPanel").hidden=finished;
  document.getElementById("elapsedTime").textContent=`Elapsed time: ${time}`;
  const finishTime=document.getElementById("finishTime");
- finishTime.className=disqualified?"finishReason":"";
- finishTime.textContent=disqualified?`Max time exceeded (limit: ${formatRaceTime(raceTimeLimitSeconds)}).`:`Time: ${time}`;
+ finishTime.className=disqualification?"finishReason":"";
+ finishTime.textContent=disqualification==="abandoned"?"Leg abandoned.":
+  disqualification==="timeout"?`Max time exceeded (limit: ${formatRaceTime(raceTimeLimitSeconds)}).`:`Time: ${time}`;
  drawMap();
 }
 
@@ -944,12 +948,13 @@ function commitPreview(previewAfterCommit=mapPreviewMode||"refresh"){
 }
 
 function focusMovementControls(){
- const target=document.getElementById("movementAxes").hidden?document.getElementById("movementPanel"):move;
+ if(!mapMenu.hidden)return;
+ const target=document.getElementById("movementAxes").hidden?map:move;
  target.focus();
 }
 
 function handleMovementKey(event){
- if(finished||mapDrag||!document.getElementById("keyboardMovement")?.checked||
+ if(finished||!mapMenu.hidden||mapDrag||!document.getElementById("keyboardMovement")?.checked||
     event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||
     event.target?.closest?.('input, textarea, select, button, summary, a, [contenteditable]'))return;
  const {key}=event;
@@ -996,11 +1001,17 @@ function updateMapDrag(event){
  mapDrag.lastY=event.clientY;
 }
 
+function hideMapMenu(){
+ mapMenu.hidden=true;
+ document.getElementById("openMapMenu").setAttribute("aria-expanded","false");
+}
+
 export function initializeGame({fftLocalizer=null,maxRaceTimeSeconds=MAX_RACE_TIME_SECONDS}={}){
  if(!Number.isFinite(maxRaceTimeSeconds)||maxRaceTimeSeconds<=0)throw new RangeError('Race time limit must be positive and finite');
  raceTimeLimitSeconds=maxRaceTimeSeconds;
  fftLocalization=fftLocalizer;
  map=document.getElementById("map");
+ mapMenu=document.getElementById("mapMenu");
  mapVector=document.getElementById("mapVector");
  move=document.getElementById("move");
  moveCloud=document.getElementById("moveCloud");
@@ -1015,6 +1026,52 @@ const mapDragAdjust=document.getElementById("mapDragAdjust");
 const mapDragRelease=document.getElementById("mapDragRelease");
 const mapDragClick=document.getElementById("mapDragClick");
 const mapDragKeepPreview=document.getElementById("mapDragKeepPreview");
+const openMapMenu=document.getElementById("openMapMenu");
+const closeMapMenu=document.getElementById("closeMapMenu");
+const menuChoices=document.getElementById("mapMenuChoices");
+const menuInstructions=document.getElementById("menuInstructions");
+const menuChooseLeg=document.getElementById("menuChooseLeg");
+const instructions=document.getElementById("instructions");
+const settings=document.getElementById("movementOptions");
+const abandonConfirmation=document.getElementById("abandonConfirmation");
+function showMenuContent(content){
+ menuChoices.hidden=Boolean(content);
+ instructions.hidden=content!==instructions;
+ settings.hidden=content!==settings;
+ abandonConfirmation.hidden=content!==abandonConfirmation;
+ (content?closeMapMenu:menuChooseLeg).focus();
+}
+openMapMenu.onclick=()=>{
+ cancelMapDrag();
+ mapMenu.hidden=false;
+ openMapMenu.setAttribute("aria-expanded","true");
+ showMenuContent(null);
+};
+menuInstructions.onclick=()=>showMenuContent(instructions);
+document.getElementById("menuSettings").onclick=()=>showMenuContent(settings);
+menuChooseLeg.onclick=()=>{
+ if(mapMenu.hidden)return;
+ if(!finished){showMenuContent(abandonConfirmation);return}
+ hideMapMenu();
+ openLegPicker();
+};
+function abandonCourse(chooseLeg){
+ if(finished||mapMenu.hidden||abandonConfirmation.hidden)return;
+ disqualification="abandoned";
+ finished=true;
+ candidate=null;
+ hideMapMenu();
+ if(chooseLeg){openLegPicker("direct");return}
+ draw();
+ document.getElementById("playAgain").focus();
+}
+document.getElementById("confirmAbandonAndChooseLeg").onclick=()=>abandonCourse(true);
+document.getElementById("confirmAbandonAndViewRoute").onclick=()=>abandonCourse(false);
+closeMapMenu.onclick=()=>{
+ if(menuChoices.hidden){showMenuContent(null);return}
+ hideMapMenu();
+ focusMovementControls();
+};
 function restoreMovementControlDefaults(){
  movementAxesEnabled.checked=movementAxesEnabled.defaultChecked;
  movementAxes.hidden=!movementAxesEnabled.checked;
@@ -1031,7 +1088,7 @@ movementAxesEnabled.onchange=()=>{
  if(keyboardMovement?.checked)focusMovementControls();
 };
 move.addEventListener("mousemove",e=>{
- if(movementAxes.hidden||mapDrag)return;
+ if(movementAxes.hidden||!mapMenu.hidden||mapDrag)return;
  movementHovered=true;
  if(finished)return;const r=move.getBoundingClientRect();let x=2*(e.clientX-r.left)/r.width-1,y=1-2*(e.clientY-r.top)/r.height,d=Math.hypot(x,y);if(d>1){x/=d;y/=d}
  keyboardPreview=false;
@@ -1056,7 +1113,7 @@ mapDragSettings.onchange=()=>{
  if(mapPreviewMode)mapPreviewMode=mapDragKeepPreview.checked?"refresh":"clear";
 };
 map.addEventListener("pointerdown",event=>{
- if(!dragOnMap.checked||finished||mapDrag||event.pointerType!=="mouse"||event.button!==0)return;
+ if(!dragOnMap.checked||finished||!mapMenu.hidden||mapDrag||event.pointerType!=="mouse"||event.button!==0)return;
  event.preventDefault();
  map.setPointerCapture(event.pointerId);
  const adjust=mapDragAdjust.checked&&candidate;
@@ -1103,18 +1160,21 @@ if(keyboardMovement)keyboardMovement.onchange=()=>{
 window.addEventListener("keydown",handleMovementKey);
 document.getElementById("reset").onclick=()=>{
  restoreMovementControlDefaults();
- document.getElementById("instructions").open=true;
- document.getElementById("movementOptions").open=false;
  if(startConfiguration(1)&&keyboardMovement?.checked)focusMovementControls();
 };
 document.getElementById("next").onclick=nextConfiguration;
+function openLegPicker(view="results"){
+ choosingReplay=view;
+ draw();
+ document.getElementById("playSame").focus();
+}
 document.getElementById("playAgain").onclick=()=>{
  if(!finished)return;
- choosingReplay=true;draw();document.getElementById("playSame").focus();
+ openLegPicker();
 };
 document.getElementById("playSame").onclick=()=>{reset();focusMovementControls()};
 document.getElementById("replayBack").onclick=()=>{
- choosingReplay=false;
+ choosingReplay=null;
  document.getElementById("configurationForm").hidden=true;
  document.getElementById("configurationError").textContent="";
  document.getElementById("playByNumber").setAttribute("aria-expanded","false");
