@@ -1,4 +1,5 @@
 import webfft from "webfft";
+import { readEnvironmentCapabilities } from "./environment_capabilities.js";
 "use strict";
 
 // Shared grid primitives. Coordinates are normalized by LEG_M = 1000 m.
@@ -164,7 +165,8 @@ let moveCount=0,raceTimeSec=0,lastDetections=[],hoverS={x:0,y:0},movementHovered
 const KEYBOARD_DISTANCE_STEP_M=10;
 const KEYBOARD_TURN_STEP_RAD=Math.PI/180,KEYBOARD_REPEAT_TURN_STEP_RAD=5*Math.PI/180;
 let movementAngle=Math.PI/2,keyboardPreview=false;
-let mapDrag=null,mapPreviewMode=null;
+let mapDrag=null,mapPreviewSettings=null;
+const SWIPE_THRESHOLD_PX=5;
 let state=null,candidate=null,numericalMessage="";
 let fftLocalization=null;
 let lastTimes={candidate:0,localization:0,ppi:0,control:0,commit:0};
@@ -685,7 +687,7 @@ function commit(sx,sy,previewAfterCommit){
     hoverS={x:0,y:0};
     movementAngle=Math.PI/2;
     keyboardPreview=false;
-    mapPreviewMode=null;
+    mapPreviewSettings=null;
   }else if(previewAfterCommit==="refresh"&&!finished)updateMovementPreview(sx,sy);
   draw();
 }
@@ -710,7 +712,7 @@ function reset(){
  document.getElementById("playByNumber").setAttribute("aria-expanded","false");
  movementHovered=false;
  mapDrag=null;
- mapPreviewMode=null;
+ mapPreviewSettings=null;
  movementAngle=Math.PI/2;
  keyboardPreview=false;
  actual={x:MapCourse.C12.x,y:MapCourse.C12.y};finished=false;moveCount=0;raceTimeSec=0;lastDetections=[];hoverS={x:0,y:0};candidate=null;numericalMessage="";lastGridDiagnostic="No movement committed yet.";lastPpiDiscarded=0;largestPpiDiscards=[];
@@ -864,7 +866,7 @@ function drawMove(){
  g.appendChild(north);
  const px=cx+hoverS.x*LEG_M,py=cy-hoverS.y*LEG_M;g.appendChild(svgEl("line",{x1:cx,y1:cy,x2:px,y2:py,stroke:"#111","stroke-width":2}));g.appendChild(svgEl("circle",{cx:px,cy:py,r:5,fill:"#111"}));move.appendChild(svgEl("circle",{cx,cy,r:LEG_M-.5,fill:"none",stroke:"#777"}))
  const readout=document.getElementById("movementReadout");
- readout.hidden=!candidate||(!movementHovered&&!keyboardPreview&&!mapDrag&&!mapPreviewMode)||finished;
+ readout.hidden=!candidate||(!movementHovered&&!keyboardPreview&&!mapDrag&&!mapPreviewSettings)||finished;
  if(!readout.hidden){
   const direction=movementDirectionDegrees(hoverS.x,hoverS.y,MapCourse.MAP_ORIENTATION_DEG);
   const distance=Math.hypot(hoverS.x,hoverS.y)*1000;
@@ -942,7 +944,7 @@ function updateMovementPreview(x,y){
  catch(err){candidate=null;numericalMessage="HOVER ERROR: "+err.message}
 }
 
-function commitPreview(previewAfterCommit=mapPreviewMode||"refresh"){
+function commitPreview(previewAfterCommit=mapPreviewSettings&&!mapPreviewSettings.keepPreview.checked?"clear":"refresh"){
  try{commit(hoverS.x,hoverS.y,previewAfterCommit)}
  catch(err){numericalMessage="COMMIT ERROR: "+err.message;candidate=null;draw()}
 }
@@ -976,7 +978,7 @@ function handleMovementKey(event){
  if(key==="ArrowLeft")movementAngle+=turnStep;
  if(key==="ArrowRight")movementAngle-=turnStep;
  keyboardPreview=true;
- mapPreviewMode=null;
+ mapPreviewSettings=null;
  updateMovementPreview(distance*Math.cos(movementAngle),distance*Math.sin(movementAngle));
  draw();
 }
@@ -1001,6 +1003,11 @@ function updateMapDrag(event){
  mapDrag.lastY=event.clientY;
 }
 
+function movedFromMapGestureStart(event){
+ const distance=Math.hypot(event.clientX-mapDrag.startX,event.clientY-mapDrag.startY);
+ return mapDrag.pointerType==="touch"?distance>=SWIPE_THRESHOLD_PX:distance>0;
+}
+
 function hideMapMenu(){
  mapMenu.hidden=true;
  document.getElementById("openMapMenu").setAttribute("aria-expanded","false");
@@ -1019,13 +1026,36 @@ export function initializeGame({fftLocalizer=null,maxRaceTimeSeconds=MAX_RACE_TI
  moveCtx=moveCloud.getContext("2d");
 const movementAxes=document.getElementById("movementAxes");
 const movementAxesEnabled=document.getElementById("movementAxesEnabled");
+const movementAxesOption=document.getElementById("movementAxesOption");
 const keyboardMovement=document.getElementById("keyboardMovement");
 const dragOnMap=document.getElementById("dragOnMap");
-const mapDragSettings=document.getElementById("mapDragSettings");
-const mapDragAdjust=document.getElementById("mapDragAdjust");
-const mapDragRelease=document.getElementById("mapDragRelease");
-const mapDragClick=document.getElementById("mapDragClick");
-const mapDragKeepPreview=document.getElementById("mapDragKeepPreview");
+const swipeOnMap=document.getElementById("swipeOnMap");
+const swipeOnMapOption=document.getElementById("swipeOnMapOption");
+const environment=readEnvironmentCapabilities();
+const {supportsTouch,hasPrimaryFinePointer}=environment;
+const keyboardDefault=!supportsTouch||hasPrimaryFinePointer;
+let keyboardUsed=false;
+const movementMethods=[
+ {input:swipeOnMap,option:swipeOnMapOption,summary:document.getElementById("swipeOnMapSummary"),available:()=>supportsTouch},
+ {input:dragOnMap,option:document.getElementById("dragOnMapOption"),summary:document.getElementById("dragOnMapSummary"),available:()=>environment.hasFinePointer??!supportsTouch},
+ {input:keyboardMovement,option:document.getElementById("keyboardMovementOption"),summary:document.getElementById("keyboardMovementSummary"),available:()=>keyboardDefault||keyboardUsed},
+ {input:movementAxesEnabled,option:movementAxesOption,summary:document.getElementById("movementAxesSummary"),available:()=>environment.hasFinePointer??!supportsTouch}
+];
+for(const {input,summary} of movementMethods){
+ summary.onclick=event=>{if(input.disabled)event.preventDefault()};
+}
+function mapGestureSettings(prefix,enabled){
+ return {
+  enabled,
+  fieldset:document.getElementById(prefix+"Settings"),
+  adjust:document.getElementById(prefix+"Adjust"),
+  release:document.getElementById(prefix+"Release"),
+  click:document.getElementById(prefix+"Click"),
+  keepPreview:document.getElementById(prefix+"KeepPreview")
+ };
+}
+const dragSettings=mapGestureSettings("mapDrag",dragOnMap);
+const swipeSettings=mapGestureSettings("mapSwipe",swipeOnMap);
 const openMapMenu=document.getElementById("openMapMenu");
 const closeMapMenu=document.getElementById("closeMapMenu");
 const menuChoices=document.getElementById("mapMenuChoices");
@@ -1074,13 +1104,33 @@ closeMapMenu.onclick=()=>{
 };
 function restoreMovementControlDefaults(){
  movementAxesEnabled.checked=movementAxesEnabled.defaultChecked;
- movementAxes.hidden=!movementAxesEnabled.checked;
- if(keyboardMovement)keyboardMovement.checked=keyboardMovement.defaultChecked;
+ keyboardMovement.checked=keyboardMovement.defaultChecked&&keyboardDefault;
  dragOnMap.checked=dragOnMap.defaultChecked;
- for(const input of mapDragSettings.querySelectorAll("input"))input.checked=input.defaultChecked;
- mapDragSettings.disabled=!dragOnMap.checked;
+ swipeOnMap.checked=supportsTouch;
+ for(const settings of [dragSettings,swipeSettings]){
+  for(const input of settings.fieldset.querySelectorAll("input"))input.checked=input.defaultChecked;
+ }
+ updateMovementAvailability();
+}
+function updateMovementAvailability(){
+ for(const {input,option,summary,available} of movementMethods){
+  const unavailable=!available();
+  summary.setAttribute("aria-disabled",String(unavailable));
+  input.disabled=unavailable;
+  if(unavailable){input.checked=false;option.open=false}
+ }
+ for(const settings of [dragSettings,swipeSettings]){
+  settings.fieldset.disabled=!settings.enabled.checked;
+ }
+ movementAxes.hidden=!movementAxesEnabled.checked;
+ if(mapDrag?.settings.enabled.disabled)cancelMapDrag();
+ if(mapPreviewSettings?.enabled.disabled)mapPreviewSettings=null;
 }
 restoreMovementControlDefaults();
+environment.onFinePointerChange(()=>{
+ updateMovementAvailability();
+ drawMove();
+});
 movementAxesEnabled.onchange=()=>{
  movementAxes.hidden=!movementAxesEnabled.checked;
  movementHovered=false;
@@ -1092,33 +1142,39 @@ move.addEventListener("mousemove",e=>{
  movementHovered=true;
  if(finished)return;const r=move.getBoundingClientRect();let x=2*(e.clientX-r.left)/r.width-1,y=1-2*(e.clientY-r.top)/r.height,d=Math.hypot(x,y);if(d>1){x/=d;y/=d}
  keyboardPreview=false;
- mapPreviewMode=null;
+ mapPreviewSettings=null;
  if(d>0)movementAngle=Math.atan2(y,x);
  updateMovementPreview(x,y);
  draw();
 });
 move.addEventListener("mouseleave",()=>{movementHovered=false;drawMove()});
 move.addEventListener("click",()=>{if(!movementAxes.hidden&&!mapDrag)commitPreview()});
-dragOnMap.onchange=()=>{
- mapDragSettings.disabled=!dragOnMap.checked;
- if(!dragOnMap.checked){
-  cancelMapDrag();
-  mapPreviewMode=null;
-  drawMove();
- }
- if(keyboardMovement?.checked)focusMovementControls();
-};
-mapDragSettings.onchange=()=>{
- cancelMapDrag();
- if(mapPreviewMode)mapPreviewMode=mapDragKeepPreview.checked?"refresh":"clear";
-};
+for(const settings of [dragSettings,swipeSettings]){
+ settings.enabled.onchange=()=>{
+  settings.fieldset.disabled=!settings.enabled.checked;
+  if(!settings.enabled.checked){
+   if(mapDrag?.settings===settings)cancelMapDrag();
+   if(mapPreviewSettings===settings){mapPreviewSettings=null;drawMove()}
+  }
+  if(keyboardMovement?.checked)focusMovementControls();
+ };
+ settings.fieldset.onchange=()=>{
+  if(mapDrag?.settings===settings)cancelMapDrag();
+ };
+}
 map.addEventListener("pointerdown",event=>{
- if(!dragOnMap.checked||finished||!mapMenu.hidden||mapDrag||event.pointerType!=="mouse"||event.button!==0)return;
+ const {pointerType}=event;
+ if(pointerType==="touch"&&event.isPrimary===false){
+  if(mapDrag?.pointerType==="touch")cancelMapDrag();
+  return;
+ }
+ const settings=pointerType==="mouse"?dragSettings:pointerType==="touch"?swipeSettings:null;
+ if(!settings?.enabled.checked||finished||!mapMenu.hidden||mapDrag||event.button!==0)return;
  event.preventDefault();
  map.setPointerCapture(event.pointerId);
- const adjust=mapDragAdjust.checked&&candidate;
+ const adjust=settings.adjust.checked&&candidate;
  mapDrag={
-  pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,
+  pointerId:event.pointerId,pointerType,settings,startX:event.clientX,startY:event.clientY,
   lastX:event.clientX,lastY:event.clientY,hasDragged:false,
   baseX:adjust?hoverS.x:0,
   baseY:adjust?hoverS.y:0,
@@ -1128,25 +1184,29 @@ map.addEventListener("pointerdown",event=>{
 map.addEventListener("pointermove",event=>{
  if(mapDrag?.pointerId!==event.pointerId)return;
  if(event.clientX===mapDrag.lastX&&event.clientY===mapDrag.lastY)return;
+ if(!mapDrag.hasDragged&&!movedFromMapGestureStart(event))return;
  mapDrag.hasDragged=true;
  updateMapDrag(event);
  draw();
 });
 map.addEventListener("pointerup",event=>{
  if(mapDrag?.pointerId!==event.pointerId||event.button!==0)return;
- const {hasDragged,startX,startY}=mapDrag;
- const release=mapDragRelease.checked;
- const previewAfterCommit=mapDragKeepPreview.checked?"refresh":"clear";
- const movedFromStart=event.clientX!==startX||event.clientY!==startY;
+ const {hasDragged,settings}=mapDrag;
+ const release=settings.release.checked;
+ const previewAfterCommit=settings.keepPreview.checked?"refresh":"clear";
+ const movedFromStart=movedFromMapGestureStart(event);
  if(!hasDragged&&!movedFromStart){
   mapDrag=null;
-  if(mapDragClick.checked&&candidate)commitPreview(previewAfterCommit);
+  if(settings.click.checked&&candidate){
+   mapPreviewSettings=settings;
+   commitPreview(previewAfterCommit);
+  }
   return;
  }
  if(release&&!movedFromStart){cancelMapDrag();return}
  if(event.clientX!==mapDrag.lastX||event.clientY!==mapDrag.lastY)updateMapDrag(event);
  mapDrag=null;
- mapPreviewMode=candidate?previewAfterCommit:null;
+ mapPreviewSettings=candidate?settings:null;
  if(release&&candidate)commitPreview(previewAfterCommit);
  else draw();
 });
@@ -1157,7 +1217,14 @@ if(keyboardMovement)keyboardMovement.onchange=()=>{
  if(keyboardMovement.checked)focusMovementControls();
  else{keyboardPreview=false;drawMove()}
 };
-window.addEventListener("keydown",handleMovementKey);
+window.addEventListener("keydown",event=>{
+ if(keyboardMovement.disabled&&event.key&&event.key!=="Unidentified"&&!event.isComposing){
+  keyboardUsed=true;
+  updateMovementAvailability();
+  return;
+ }
+ handleMovementKey(event);
+});
 document.getElementById("reset").onclick=()=>{
  restoreMovementControlDefaults();
  if(startConfiguration(1)&&keyboardMovement?.checked)focusMovementControls();
